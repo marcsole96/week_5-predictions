@@ -1,0 +1,52 @@
+---
+output:
+  html_document:
+        theme: readable
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r, message=FALSE, warning=FALSE, echo=F,results='asis'}
+library(tidyverse)
+library(cowplot)
+
+knitr::opts_chunk$set(fig.width=180/25.4, fig.height=120/25.4)
+knitr::opts_chunk$set(dpi = 108)
+knitr::opts_chunk$set(comment = NA) # Remove the ## in from of output
+text_base_size   <- 12
+theme_set(theme_cowplot(font_size = text_base_size, rel_small = 1, rel_tiny = 1, rel_large = 1))
+
+mycolors      <- c('#D43F3A', '#EEA236','#5CB85C', '#46B8DA', '#357EBD', '#9632B8','#B8B8B8')
+
+
+```
+
+
+```{r}
+
+df <- read_rds(path = "ALS_progression_rate.1822x370.rds")  %>% tbl_df()
+
+```
+
+
+```{r}
+
+knitr::kable(head(df[,1:6]))
+
+```
+
+```{r, warning=F}
+knitr::kable(head(df[,c(1,250:255)]))
+
+```
+
+
+```{r}
+
+ggplot(df, aes(x=dFRS)) + geom_histogram()
+
+```
+
+
+

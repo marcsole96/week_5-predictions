@@ -1,0 +1,130 @@
+---
+title: "Week 05 in Statistical machine learning in bioinformatics"
+author: "Thomas Bataillon"
+date: "25/02/2021"
+output:
+  html_document:
+        theme: readable
+editor_options: 
+  chunk_output_type: console
+---
+
+  git config --global user.email "you@example.com"
+  git config --global user.name "Your Name"
+
+---
+
+## Goals of the exercise session
+
+0. Ask iker if you need clarification on how to implement LDA QDA, KNN & logistic regression and ...
+
+1. Check that you are clear on how to cross validate both the AlS and TCGA datasets
+
+2. Work on the TCGA and ALS dataset in R
+
+3. Submit your predictions by Friday March 5 @12.00
+
+## ALS dataset 
+
+Loading the data
+```{r}
+library(tidyverse)
+
+als <- read_rds("../datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")
+
+als_train <- als %>% 
+  filter(!is.na(dFRS))
+
+als_predict <- als %>% 
+  filter(is.na(dFRS))
+
+
+head(als_train)
+head(als_predict)
+```
+>Q Use multiple linear regression for making prediction on the ALS rsponse variable 
+
+```{r}
+
+#Make model with ALL predictors (We should check which are more important)
+#Does multiple linear regression accept binomial predictors?
+mlg <- lm(dFRS~.,data=als_train)
+
+#Our model fits poorly
+summary(mlg)$r.sq
+
+
+#Predict dFRS on our predict dataframe
+glm_als_predict<-als_predict
+glm_als_predict$dFRS_Predicted = predict.glm(mlg, glm_als_predict, type = "response")
+
+#Plot the fit using Onset.Delta since it is continuous 
+ggplot(glm_als_predict, aes(x=Onset.Delta, y=dFRS_Predicted)) +
+  geom_point() +
+  geom_smooth(method = "glm", se = FALSE) + 
+  NULL
+```
+
+
+
+>Q use cross validation to examine how accurate are the predictions you can make
+
+```{r}
+# Function for calculating the 10-fold CV error
+cross_validation <- function(dataset, k=10){
+  
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = FALSE)  # Generate breaks
+  cvfolds <- sample(cvfolds)                                      # Randomize breaks
+
+  observed  <- dataset$dFRS                                       # Get observed values
+  predicted <- rep(NA, nrow(dataset))                             # Empty vector for predicted values
+  
+  for (i in 1:k){                                                 # For each fold
+    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
+    testdata  <- dataset[rows,]                                   # Get test values
+    traindata <- dataset[-rows,]                                  # Get training values
+    fit       <- lm(dFRS~., data=traindata)                       # Fit the model with training data
+    tmp       <- predict(fit,newdata = testdata)                  # Predict on test data
+    predicted[rows] <- tmp                                        # Add predictions to vector
+  }
+  
+  rmse_cv <- sqrt(mean((observed-predicted)^2))        # Calculate CV RMSE
+
+    fit        <- lm(dFRS~., data=dataset)                          # Fit the model with all the dataset
+  observed   <- dataset$dFRS                                      # Get observed values
+  predicted  <- predict(fit,newdata = dataset)                    # Get predicted values
+  rmse_train <- sqrt(mean((observed-predicted)^2))     # Calculate training RMSE
+  
+  return(c(rmse_cv, rmse_train))                                  # Return CV and training RMSEs
+}
+
+pd <- tibble(run=1:5)                                             # Empty tibble for five different runs
+
+for (i in pd$run) {                                               # For each of the runs
+  set.seed(i)
+  r <- cross_validation(als_train, 10)                             # Run the CV analysis
+  pd$rmse_cv[i] <- r[1]                                           # Save the CV RMSE
+  pd$rmse_train <- r[2]                                           # Save the training RMSE
+  cat("Run", i, "\n")                                             # Print status
+  flush.console()
+}
+
+knitr::kable(pd)
+```
+
+
+>Q Upload yourbest predictions as a TEAM using a rds format 
+
+
+
+## TCGA dataset
+
+>Q Apply classication methods to the TCGA datset for making prediction on  samples
+
+You can use any method we have covered so far (i.e. logistic regression , LDA QDA or even KNN) and use any predictors from the TCGA dataset.
+
+>Q use cross validation to examine how accurate are the predictions you can make 
+
+>Q Apply QDA to the TCGA datset for making prediction on tissues samples
+
+>Q submit your  best predictions as a TEAM using a rds format 
