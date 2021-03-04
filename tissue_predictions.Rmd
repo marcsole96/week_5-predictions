@@ -1,0 +1,193 @@
+---
+title: "Week 05 in Statistical machine learning in bioinformatics"
+author: "Thomas Bataillon"
+date: "25/02/2021"
+output:
+  html_document:
+        theme: readable
+editor_options: 
+  chunk_output_type: console
+---
+
+  git config --global user.email "you@example.com"
+  git config --global user.name "Your Name"
+
+---
+
+
+## TCGA dataset
+
+
+```{r}
+library(MASS)
+
+tcgadf <- read_rds("datasets/TCGA_cancer_classification/miniTCGA.3349x4006.rds")
+
+data_train <- tcgadf %>% 
+  filter(!is.na(tissue))
+
+data_predict <- tcgadf %>% 
+  filter(is.na(tissue))
+
+
+head(data_train)
+head(data_predict)
+```
+
+
+```{r}
+mean_tab <- data_train %>% # Mean gene expression for each gene separated by tissue
+  dplyr::select(-c(rowid, response, starts_with('pc'))) %>% 
+  group_by(tissue) %>% 
+  summarise_all(mean)
+
+
+(genes_with_dif <- mean_tab %>% 
+  pivot_longer(-tissue) %>% 
+  group_by(name) %>% 
+  summarise(
+    dif_breast_kidney = abs(value[tissue == "Breast"]-value[tissue == "Kidney"]),
+    dif_breast_lung = abs(value[tissue == "Breast"]-value[tissue == "Lung"]),
+    dif_lung_kidney = abs(value[tissue == "Lung"]-value[tissue == "Kidney"]),
+    total_dif = sum(dif_breast_lung + dif_breast_kidney + dif_lung_kidney)
+  ) %>% 
+    arrange(desc(total_dif)) %>% 
+   drop_na())
+
+form <- paste0(
+  'tissue~',
+  paste0(genes_with_dif$name[1:5], collapse = '+'))
+
+# LDA 5 genes with highest overall difference
+(genes_5 <- lda(tissue ~ CXCL17.284340 + KRT6A.3853 + UGT1A6.54578 + EMX2.2018 + C19orf77.284422, data=data_train))      
+
+# LDA top 3 genes with highest difference for each pair
+(genes_top3each <- lda(tissue ~ UGT1A6.54578 + C19orf77.284422 + NR1H4.9971 + SFTA3.253970 + DMBT1.1755 + PIP.5304 + CXCL17.284340 + KRT6A.3853 + EMX2.2018, data=data_train))
+
+# QDA 5 genes with highest overall difference
+(genes_5_qda <- qda(tissue ~ CXCL17.284340 + KRT6A.3853 + UGT1A6.54578 + EMX2.2018 + C19orf77.284422, data=data_train)) 
+
+# QDA top 3 genes with highest difference for each pair
+(genes_top3each_qda <- qda(tissue ~ UGT1A6.54578 + C19orf77.284422 + NR1H4.9971 + SFTA3.253970 + DMBT1.1755 + PIP.5304 + CXCL17.284340
+ + KRT6A.3853 + EMX2.2018, data=data_train))
+```
+
+
+```{r}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- data_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(data_train, trainfold)
+
+# LDA 5 genes with highest overall difference
+pred_genes_5 <- predict(genes_5, testfold)
+pred_class_5 <- pred_genes_5$class
+(confusion <- table(pred_class_5, testfold$tissue, dnn = c("Predicted values","True values")))
+(mean(pred_class_5 == testfold$tissue)) # 0.9609195 right predictions
+(test_error <- sum(testfold$tissue != pred_class_5)/length(testfold$tissue)) # 0.03908046 error rate
+
+# LDA top 3 genes with highest difference for each pair
+pred_genes_top3each <- predict(genes_top3each, testfold)
+pred_class_top3each <- pred_genes_top3each$class
+(confusion <- table(pred_class_top3each, testfold$tissue, dnn = c("Predicted values","True values")))
+(mean(pred_class_top3each == testfold$tissue)) # 0.9931034 right predictions
+(test_error <- sum(testfold$tissue != pred_class_top3each)/length(testfold$tissue)) # 0.006896552 error rate
+
+# QDA 5 genes with highest overall difference
+pred_genes_5 <- predict(genes_5_qda, testfold)
+pred_class_5 <- pred_genes_5$class
+(confusion <- table(pred_class_5, testfold$tissue, dnn = c("Predicted values","True values")))
+(mean(pred_class_5 == testfold$tissue)) # 0.9586207 right predictions
+(test_error <- sum(testfold$tissue != pred_class_5)/length(testfold$tissue)) # 0.04137931 error rate
+
+# QDA top 3 genes with highest difference for each pair
+pred_genes_top3each <- predict(genes_top3each_qda, testfold)
+pred_class_top3each <- pred_genes_top3each$class
+(confusion <- table(pred_class_top3each, testfold$tissue, dnn = c("Predicted values","True values")))
+(mean(pred_class_top3each == testfold$tissue)) # 0.9862069 right predictions
+(test_error <- sum(testfold$tissue != pred_class_top3each)/length(testfold$tissue)) # 0.0137931 error rate
+```
+
+
+```{r}
+# Best model
+genes_top3each <- lda(tissue ~ UGT1A6.54578 + C19orf77.284422 + NR1H4.9971 + SFTA3.253970 + DMBT1.1755 + PIP.5304 + CXCL17.284340 + KRT6A.3853 + EMX2.2018, data=data_train)
+
+
+predicted <- predict(genes_top3each, newdata = data_predict)
+predicted_class <- predicted$class
+predicted <- levels(data_train$tissue)[predicted_class]
+
+predicted <- levels(data$response)[predicted]
+
+submission <- tibble(predicted)
+
+head(submission)
+
+```
+
+
+>Q submit your  best predictions as a TEAM using a rds format 
+
+# Submitting your answer
+
+The following code will give us
+
+* your chosen team name
+* the name of the people on the team
+* your estimated error rate (from train/test or CV or similar)
+* your predictions
+
+Please edit the values below .
+
+The filename of the output will be automated minitcga_cancer_classification.TEAMNAME.rds
+
+Please - do not use space or funny letters in your team name.
+
+```{r}
+
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke Mirhoj", "Marc Sole", "Max Gubert")
+team_error       <- test_error
+team_predictions <- submission
+
+#
+# Always run this code
+# If it fails you have done something wrong!
+#
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error, team_predictions), 
+          path = paste("minitcga_tissue_classification.", team_name, ".rds", sep=""))
+
+```
+
+# Checking format of all saved objects
+
+```{r}
+
+files   <- Sys.glob("minitcga_tissue_classification.*.rds")
+results <- tibble(filename = files)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]     <- x[[1]]
+  results$team_people[i]   <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_error[i]    <- x[[3]]
+  y                        <- x[[4]]
+  results$n_Lung          <- sum(y$predicted=="Lung")
+  results$n_Kidney         <- sum(y$predicted=="Kidney")
+  results$n_Breast         <- sum(y$predicted=="Breast")
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+
+```
+
+# Upload your rds file!
