@@ -9,9 +9,6 @@ editor_options:
   chunk_output_type: console
 ---
 
-  git config --global user.email "you@example.com"
-  git config --global user.name "Your Name"
-
 ---
 
 
@@ -95,15 +92,11 @@ ggplot(glm_als_predict, aes(x=Onset.Delta, y=dFRS_Predicted)) +
   geom_point() +
   geom_smooth(method = "glm", se = FALSE) + 
   NULL
-
-
-
 ```
 
 
 
 >Q use cross validation to examine how accurate are the predictions you can make
-
 ```{r}
 # Function for calculating the 10-fold CV error
 cross_validation <- function(dataset, k=10){
@@ -233,35 +226,3 @@ results %>% select(-filename)
 ```
 
 # Upload your rds file!
-
-
-
-
-
-
-
-
-
-
-
-
-
->Q Upload yourbest predictions as a TEAM using a rds format 
-
-
-
-## TCGA dataset
-
->Q Apply classication methods to the TCGA datset for making prediction on  samples
-
-You can use any method we have covered so far (i.e. logistic regression , LDA QDA or even KNN) and use any predictors from the TCGA dataset.
-
-
-CANCER-> Logistic
-TISSUE-> LDA or QDA
-
->Q use cross validation to examine how accurate are the predictions you can make 
-
->Q Apply QDA to the TCGA datset for making prediction on tissues samples
-
->Q submit your  best predictions as a TEAM using a rds format 
