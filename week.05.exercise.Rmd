@@ -88,7 +88,7 @@ car::vif(mlg)
 
 #Predict dFRS on our predict dataframe
 glm_als_predict<-als_predict
-glm_als_predict$dFRS_Predicted = predict.glm(mlg, glm_als_predict, type = "response")
+glm_als_predict$response = predict.glm(mlg, glm_als_predict, type = "response")
 
 #Plot the fit using Onset.Delta since it is continuous 
 ggplot(glm_als_predict, aes(x=Onset.Delta, y=dFRS_Predicted)) +
@@ -125,7 +125,7 @@ cross_validation <- function(dataset, k=10){
   
   rmse_cv <- sqrt(mean((observed-predicted)^2))        # Calculate CV RMSE
 
-    fit        <- lm(dFRS~., data=dataset)                          # Fit the model with all the dataset
+    fit        <- lm(myForm, data=dataset)                          # Fit the model with all the dataset
   observed   <- dataset$dFRS                                      # Get observed values
   predicted  <- predict(fit,newdata = dataset)                    # Get predicted values
   rmse_train <- sqrt(mean((observed-predicted)^2))     # Calculate training RMSE
@@ -146,6 +146,104 @@ for (i in pd$run) {                                               # For each of 
 
 knitr::kable(pd)
 ```
+
+
+
+```{r}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+# We fit our model to the training fold
+fit <-  lm(formula  = myForm, data = trainfold)
+
+# We predict on the test fold
+predicted <- predict(fit, newdata = testfold)
+
+submission <- tibble(predicted)
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$dFRS
+mse       <- mean((observed-predicted)^2)
+(rmse     <- sqrt(mse))
+
+test_rmse <- rmse
+```
+
+
+# Submitting your answer
+
+The following code will give us
+
+* your chosen team name
+* the name of the people on the team
+* your estimated RMSE (from train/test or CV or similar)
+* your predictions
+
+Please edit the values below .
+
+The filename of the output will be automated als_progression.TEAMNAME.rds
+
+Please - do not use space or funny letters in your team name.
+
+```{r}
+
+team_name        <- "Team Bulbasaur"
+team_people      <- c("Max Gubert", "Rikke Jensen", "Marc Solé")
+team_error_rate  <- test_rmse
+team_predictions <- submission
+
+#
+# Always run this code
+# If it fails you have done something wrong!
+#
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error_rate, team_predictions), 
+          path = paste("als_progression.", team_name, ".rds", sep=""))
+
+```
+
+# Checking format of all saved objects
+
+```{r}
+
+files   <- Sys.glob("als_progression.*.rds")
+results <- tibble(filename = files, team_name=NA, team_people=NA, team_rmse=NA,n=NA, mean=NA)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]        <- x[[1]]
+  results$team_people[i]      <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_rmse[i]        <- x[[3]]
+  y                           <- x[[4]]
+  results$n                   <- nrow(y)
+  results$mean                <- mean(y$predicted, na.rm = T)
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+
+```
+
+# Upload your rds file!
+
+
+
+
+
+
+
+
+
+
+
 
 
 >Q Upload yourbest predictions as a TEAM using a rds format 
