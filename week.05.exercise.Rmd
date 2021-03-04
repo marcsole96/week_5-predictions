@@ -14,6 +14,7 @@ editor_options:
 
 ---
 
+
 ## ALS dataset 
 
 MULTIPLE LINEAR REGRESSION
@@ -48,9 +49,8 @@ sum(is.na(als_train))
 
 ```
 
-Find the best predictors:
-https://stackoverflow.com/questions/18275639/remove-highly-correlated-variables
 
+We can make a correlation matrix to take a peek at how much correlation between the predictors we observe
 ```{r}
 correlation_matrix<-cor(als_train)
 ```
@@ -80,11 +80,11 @@ while(any(all_vifs > 4)){
   var_with_max_vif <- names(which(all_vifs == max(all_vifs)))  # get the var with max vif
   signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
   myForm <- as.formula(paste("dFRS ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
-  selectedMod <- lm(myForm, data=als_train)  # re-build model with new formula
-  all_vifs <- car::vif(selectedMod)
+  mlg <- lm(myForm, data=als_train)  # re-build model with new formula
+  all_vifs <- car::vif(mlg)
 }
-summary(selectedMod)
-car::vif(selectedMod)
+summary(mlg)
+car::vif(mlg)
 
 #Predict dFRS on our predict dataframe
 glm_als_predict<-als_predict
@@ -95,6 +95,9 @@ ggplot(glm_als_predict, aes(x=Onset.Delta, y=dFRS_Predicted)) +
   geom_point() +
   geom_smooth(method = "glm", se = FALSE) + 
   NULL
+
+
+
 ```
 
 
@@ -115,7 +118,7 @@ cross_validation <- function(dataset, k=10){
     rows      <- which(cvfolds==i)                                # Get values belonging to that fold
     testdata  <- dataset[rows,]                                   # Get test values
     traindata <- dataset[-rows,]                                  # Get training values
-    fit       <- lm(dFRS~., data=traindata)                       # Fit the model with training data
+    fit       <- lm(myForm, data=traindata)                       # Fit the model with training data
     tmp       <- predict(fit,newdata = testdata)                  # Predict on test data
     predicted[rows] <- tmp                                        # Add predictions to vector
   }
