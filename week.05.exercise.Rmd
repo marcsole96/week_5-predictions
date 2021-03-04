@@ -14,6 +14,10 @@ editor_options:
 
 ---
 
+HOLA? SóC A LA BRANCA QUE TOCA?
+
+
+
 ## Goals of the exercise session
 
 0. Ask iker if you need clarification on how to implement LDA QDA, KNN & logistic regression and ...
