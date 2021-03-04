@@ -14,26 +14,24 @@ editor_options:
 
 ---
 
-HOLA? SóC A LA BRANCA QUE TOCA?
-
-
-
-## Goals of the exercise session
-
-0. Ask iker if you need clarification on how to implement LDA QDA, KNN & logistic regression and ...
-
-1. Check that you are clear on how to cross validate both the AlS and TCGA datasets
-
-2. Work on the TCGA and ALS dataset in R
-
-3. Submit your predictions by Friday March 5 @12.00
-
 ## ALS dataset 
+
+MULTIPLE LINEAR REGRESSION
+
+Load Libraries
+```{r}
+# install.packages(c('tibble', 'dplyr', 'tidyr'))
+library(tibble)
+library(dplyr)
+library(tidyr)
+library(tidyverse)
+library(car)
+
+```
+
 
 Loading the data
 ```{r}
-library(tidyverse)
-
 als <- read_rds("datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")
 
 als_train <- als %>% 
@@ -45,59 +43,17 @@ als_predict <- als %>%
 
 head(als_train)
 head(als_predict)
+
+sum(is.na(als_train))
+
 ```
 
-MULTIPLE LINEAR REGRESSION
-
+Find the best predictors:
+https://stackoverflow.com/questions/18275639/remove-highly-correlated-variables
 
 ```{r}
-# install.packages(c('tibble', 'dplyr', 'tidyr'))
-library(tibble)
-library(dplyr)
-library(tidyr)
-
-d <- als_predict
-
-d2 <- d %>% 
-  as.matrix %>%
-  cor %>%
-  as.data.frame %>%
-  rownames_to_column(var = 'var1') %>%
-  gather(var2, value, -var1)
-
-
-# .5 is an arbitrary number
-filter(d2, value > .5)
-
-# remove duplicates
-d2<-d2 %>%
-  mutate(var_order = paste(var1, var2) %>%
-           strsplit(split = ' ') %>%
-           map_chr( ~ sort(.x) %>% 
-                      paste(collapse = ' '))) %>%
-  mutate(cnt = 1) %>%
-  group_by(var_order) %>%
-  mutate(cumsum = cumsum(cnt)) %>%
-  filter(cumsum != 2) %>%
-  ungroup %>%
-  select(-var_order, -cnt, -cumsum)
+correlation_matrix<-cor(als_train)
 ```
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 >Q Use multiple linear regression for making prediction on the ALS rsponse variable 
@@ -105,12 +61,30 @@ d2<-d2 %>%
 ```{r}
 
 #Make model with ALL predictors (We should check which are more important)
-#Does multiple linear regression accept binomial predictors?
+
 mlg <- lm(dFRS~.,data=als_train)
+summary(mlg$coefficients)
+summary(mlg)
 
-#Our model fits poorly
-summary(mlg)$r.sq
+#We observe 9 predictors which give NA, we will remove them manually from our model
 
+mlg <- lm(dFRS~. -Site.of.Onset.Onset..Limb.and.Bulbar -mean.height -sd.height -no.height.data -no.resp.rate.data -no.bp.diastolic.data -no.slope.fvc.liters.data -first.slope.height.date -num.slope.bp.systolic.visits,data=als_train)
+
+
+#If we run vif we can see which ones we should remove. 
+all_vifs<-car::vif(mlg)
+signif_all <- names(all_vifs)
+
+# Remove vars with VIF> 4 and re-build model until none of VIFs don't exceed 4.
+while(any(all_vifs > 4)){
+  var_with_max_vif <- names(which(all_vifs == max(all_vifs)))  # get the var with max vif
+  signif_all <- signif_all[!(signif_all) %in% var_with_max_vif]  # remove
+  myForm <- as.formula(paste("dFRS ~ ", paste (signif_all, collapse=" + "), sep=""))  # new formula
+  selectedMod <- lm(myForm, data=als_train)  # re-build model with new formula
+  all_vifs <- car::vif(selectedMod)
+}
+summary(selectedMod)
+car::vif(selectedMod)
 
 #Predict dFRS on our predict dataframe
 glm_als_predict<-als_predict
