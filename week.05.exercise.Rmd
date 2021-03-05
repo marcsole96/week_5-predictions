@@ -39,8 +39,8 @@ als_predict <- als %>%
   filter(is.na(dFRS))
 
 
-head(als_train)
-head(als_predict)
+dim(als_train)
+dim(als_predict)
 
 sum(is.na(als_train))
 
@@ -83,20 +83,19 @@ while(any(all_vifs > 4)){
 summary(mlg)
 car::vif(mlg)
 
-#Predict dFRS on our predict dataframe
-glm_als_predict<-als_predict
-glm_als_predict$response = predict.glm(mlg, glm_als_predict, type = "response")
 
-#Plot the fit using Onset.Delta since it is continuous 
-ggplot(glm_als_predict, aes(x=Onset.Delta, y=dFRS_Predicted)) +
-  geom_point() +
-  geom_smooth(method = "glm", se = FALSE) + 
-  NULL
+predicted <- predict(object=mlg, newdata = als_predict, type = "response")
+
+submission <- tibble(predicted)
+
+head(submission)
 ```
 
 
 
 >Q use cross validation to examine how accurate are the predictions you can make
+
+
 ```{r}
 # Function for calculating the 10-fold CV error
 cross_validation <- function(dataset, k=10){
@@ -156,7 +155,6 @@ fit <-  lm(formula  = myForm, data = trainfold)
 # We predict on the test fold
 predicted <- predict(fit, newdata = testfold)
 
-submission <- tibble(predicted)
 
 # We compare with the observed values and calculate RMSE
 observed  <- testfold$dFRS
@@ -198,31 +196,29 @@ team_predictions <- team_predictions %>% select(predicted)
 
 # Save all the stuff in one object
 write_rds(x = list(team_name, team_people, team_error_rate, team_predictions), 
-          path = paste("als_progression.", team_name, ".rds", sep=""))
+          file = paste("als_progression.", team_name, ".rds", sep=""))
 
 ```
 
 # Checking format of all saved objects
 
 ```{r}
+hellor<-readRDS(file="als_progression.Team Bulbasaur.rds")
+
 
 files   <- Sys.glob("als_progression.*.rds")
 results <- tibble(filename = files, team_name=NA, team_people=NA, team_rmse=NA,n=NA, mean=NA)
 
-for (i in 1:nrow(results)) {
-  x <- read_rds(path = as.character(results$filename[i]))
+  x <-readRDS(file="als_progression.Team Bulbasaur.rds")
   results$team_name[i]        <- x[[1]]
   results$team_people[i]      <- paste(x[[2]], collapse=",", sep=" ")
   results$team_rmse[i]        <- x[[3]]
   y                           <- x[[4]]
   results$n                   <- nrow(y)
   results$mean                <- mean(y$predicted, na.rm = T)
-}
-
+  
+  
 rm(x,y)
 
 results %>% select(-filename)
-
 ```
-
-# Upload your rds file!
