@@ -1,0 +1,124 @@
+---
+title: "TCGA cancer classification"
+author: "Rikke, Max & Marc"
+date: "3/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+```
+
+```{r}
+df <- read_rds(path = "miniTCGA.3349x4006.rds") 
+```
+
+# Split into training and prediction set
+
+```{r}
+set.seed(0)
+
+data_train    <- df %>% filter(!is.na(response))
+data_predict  <- df %>% filter(is.na(response))                              
+
+dim(data_predict)
+dim(data_train)
+```
+
+# Split into train and test fold
+
+```{r}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- data_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(data_train, trainfold)
+```
+
+```{r}
+#creating a df only with response and genes
+genes <- data_train %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3")) %>% 
+  mutate(sampletype=response, #saves original variable as a new variable called sampletype
+         response=ifelse(test= response=="Tumor", yes = 1, no = 0 )) #1 = tumor, 0 = normal
+
+#identifying specific genes that might be good at discriminating between cancer and normal by finding the genes with the biggest difference in mean expression between the two classes
+genes %>% 
+  group_by(response) %>% 
+  summarise(across(everything(), mean)) %>% 
+  ungroup() %>% 
+  pivot_longer(!response, names_to = "genes", values_to = "mean_expression") %>% 
+  group_by(genes) %>% 
+  summarise(mean_exp_dif = abs(mean_expression[response == 0]) - mean_expression[response == 1]) %>% 
+  arrange(desc(mean_exp_dif)) %>% 
+  head() %>% 
+  {.}
+```
+
+
+```{r}
+# We fit our model (simple logistic regression on 6 different genes)
+fit <-  glm(response ~ GPD1.2819 + LOC284578.284578 + CHRDL1.91851 + FXYD4.53828 + CLDN8.9073 + KCNJ1.3758, data = trainfold, family=binomial(link='logit'))
+#Genes have been chosen among the genes with the highest mean difference in expression between the two classes using mixed selection by hand.
+
+# We predict on the test fold
+predicted <- predict(fit, newdata = testfold, type = "response")
+predicted <- round(predicted)+1 # Convert probabilities to 1 or 2
+predicted <- levels(trainfold$response)[predicted]
+
+# We compare with the observed values and calculate error rate
+observed    <- testfold$response
+
+# Our guess on the general error rate of the model
+(test_error <- sum(observed!=predicted)/length(observed)) 
+```
+
+```{r}
+#Fitting the model again, on the entire training dataset
+fit <-  glm(response ~ GPD1.2819 + LOC284578.284578 + CHRDL1.91851 + FXYD4.53828 + CLDN8.9073 + KCNJ1.3758, data = data_train, family=binomial(link='logit'))
+
+#Predicting actual values
+predicted <- predict(fit, newdata = data_predict, type = "response")
+predicted <- round(predicted)+1 # Convert probabilities to 1 or 2
+predicted <- levels(trainfold$response)[predicted]
+
+#Saving predictions in a new variable
+submission <- tibble(predicted)
+head(submission)
+```
+
+```{r}
+#Making file
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke", "Max", "Marc")
+team_error       <- test_error
+team_predictions <- submission
+
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error, team_predictions), 
+          path = paste("minitcga_cancer_classification.", team_name, ".rds", sep=""))
+
+#Checking file
+files   <- Sys.glob("minitcga_cancer_classification.*.rds")
+results <- tibble(filename = files)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]     <- x[[1]]
+  results$team_people[i]   <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_error[i]    <- x[[3]]
+  y                        <- x[[4]]
+  results$n_tumor          <- sum(y$predicted=="Tumor")
+  results$n_normal         <- sum(y$predicted=="Normal")
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+```
+
+
