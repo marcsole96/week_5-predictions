@@ -9,14 +9,14 @@ editor_options:
   chunk_output_type: console
 ---
 
----
+------------------------------------------------------------------------
 
-
-## ALS dataset 
+## ALS dataset
 
 MULTIPLE LINEAR REGRESSION
 
 Load Libraries
+
 ```{r}
 # install.packages(c('tibble', 'dplyr', 'tidyr'))
 library(tibble)
@@ -27,8 +27,8 @@ library(car)
 
 ```
 
-
 Loading the data
+
 ```{r}
 als <- read_rds("datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")
 
@@ -42,18 +42,17 @@ als_predict <- als %>%
 dim(als_train)
 dim(als_predict)
 
-sum(is.na(als_train))
+sum(is.na(als_predict))
 
 ```
 
-
 We can make a correlation matrix to take a peek at how much correlation between the predictors we observe
+
 ```{r}
 correlation_matrix<-cor(als_train)
 ```
 
-
->Q Use multiple linear regression for making prediction on the ALS rsponse variable 
+> MLG to predict the response
 
 ```{r}
 
@@ -91,10 +90,21 @@ submission <- tibble(predicted)
 head(submission)
 ```
 
+> KNN Regression to predict the response
+
+```{r}
+set.seed(1)
+
+knn_pred <- FNN::knn.reg(as.data.frame(als_train[-1]), 
+                test=as.data.frame(als_predict[-1]), as.data.frame(als_train[1]),
+                k = 10)
+knn_pred
+
+submission<-data.frame(knn_pred$pred)
+```
 
 
->Q use cross validation to examine how accurate are the predictions you can make
-
+> Q use cross validation to examine how accurate are the predictions you can make
 
 ```{r}
 # Function for calculating the 10-fold CV error
@@ -139,8 +149,6 @@ for (i in pd$run) {                                               # For each of 
 knitr::kable(pd)
 ```
 
-
-
 ```{r}
 # Always make the same split
 set.seed(0)
@@ -150,29 +158,31 @@ trainfold <- als_train %>% sample_frac(size=0.80)
 testfold  <- setdiff(als_train, trainfold)
 
 # We fit our model to the training fold
-fit <-  lm(formula  = myForm, data = trainfold)
+#fit <-  lm(formula  = myForm, data = trainfold)
 
 # We predict on the test fold
-predicted <- predict(fit, newdata = testfold)
-
+predicted <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
+                test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
+                k = 10)
 
 # We compare with the observed values and calculate RMSE
 observed  <- testfold$dFRS
-mse       <- mean((observed-predicted)^2)
+mse       <- mean((observed-predicted$pred)^2)
 (rmse     <- sqrt(mse))
 
 test_rmse <- rmse
-```
 
+
+```
 
 # Submitting your answer
 
 The following code will give us
 
-* your chosen team name
-* the name of the people on the team
-* your estimated RMSE (from train/test or CV or similar)
-* your predictions
+-   your chosen team name
+-   the name of the people on the team
+-   your estimated RMSE (from train/test or CV or similar)
+-   your predictions
 
 Please edit the values below .
 
@@ -222,4 +232,3 @@ rm(x,y)
 
 results %>% select(-filename)
 ```
-
