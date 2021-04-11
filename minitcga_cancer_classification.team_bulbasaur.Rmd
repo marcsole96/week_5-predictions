@@ -1,0 +1,258 @@
+---
+title: "TCGA cancer classification"
+author: "Rikke, Max & Marc"
+date: "3/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(randomForest)
+```
+
+
+```{r}
+df <- read_rds(path = "/Users/maxgubert/Documents/MSc Bioinformatics AU/2nd semester/SMLiB/datasets/TCGA_cancer_classification/miniTCGA.3349x4006.rds")
+```
+
+
+# Reformatting data so the methods know it is a factor we're predicting.
+
+```{r}
+df <- df %>% mutate(response = factor(response))
+
+levels(df$response)
+```
+
+# Making new names for the gene variables
+
+```{r}
+gene_names <- tibble(name = names(df)[7:ncol(df)]) %>%
+  mutate(number = row_number()) %>%
+  mutate(newname = paste("gene_", number, sep=""))
+
+gene_names
+
+names(df)[7:ncol(df)] <- gene_names$newname
+
+names(df)[1:20]
+
+rm(gene_names)
+```
+
+
+# Split into training and prediction set
+
+```{r}
+data_train    <- df %>% filter(!is.na(response))
+data_predict  <- df %>% filter(is.na(response))                              
+```
+
+
+# Creating a df only with response and genes
+
+```{r}
+genes <- data_train %>% select(!c("rowid", "pc1", "pc2", "pc3"))
+```
+
+
+```{r}
+# Always make the same split
+set.seed(5)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- genes %>% sample_frac(size=0.80)
+testfold  <- setdiff(genes, trainfold)
+```
+
+
+
+# Random forest
+
+```{r}
+set.seed(1)
+
+model1 <- randomForest(response ~., data=trainfold, ntree=100, importance=TRUE, do.trace=TRUE)
+model1 
+
+model1$confusion
+importance(model1)
+```
+
+
+```{r}
+head(model1$err.rate)
+
+model1$confusion # using all fitted trees
+
+error_rate <- model1$err.rate
+error_rate <- data.frame(error_rate)
+
+
+tree <- data.frame(n_tree = seq(1, 100, 1),
+                   normalerror = error_rate$Normal,
+                   tumorerror = error_rate$Tumor,
+                   OOBerror = error_rate$OOB)
+
+colors <- c("normalerror" = "blue", "tumorerror" = "red", "OOBerror" = "orange")
+
+ggplot(tree, aes(x=n_tree)) +
+  geom_line(aes(y=normalerror, color="normalerror")) +
+  geom_line(aes(y=tumorerror, color="tumorerror")) +
+  geom_line(aes(y=OOBerror, color="OOBerror")) +
+  labs(x = "n_trees",
+       y = "Error rate",
+       color = "Legend") +
+  scale_color_manual(values = colors)
+```
+
+
+# Cross validation
+
+```{r, warning=F}
+cross_validation <- function(dataset, mtry=NA, k=10){
+
+  if(is.na(mtry)) {
+    mtry = floor(sqrt(ncol(dataset)))
+  }
+
+  cat(paste(Sys.time(), "Doing mtry:", mtry, "k:", k, "\n"))
+  flush.console()
+
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)
+  cvfolds <- sample(cvfolds)
+  
+  observed  <- dataset$response
+  predicted <- observed
+  
+  for (i in 1:k){
+    rows      <- which(cvfolds==i)
+    testdata  <- dataset[rows,]
+    traindata <- dataset[-rows,]
+    
+    fit <-  randomForest(y = traindata$response,
+                         x = traindata %>% select(-response),
+                     ntree = 700,
+                      mtry = mtry,
+                  do.trace = F)
+    
+    tmp       <- predict(fit,newdata = testdata, type="response")
+    predicted[rows] <- tmp
+  }
+  
+  errors     <- sum(observed!=predicted)
+  error_rate <- errors/length(observed)
+  cat(paste(Sys.time(), "done, error rate:", error_rate, "\n"))
+  flush.console()
+  return(error_rate)
+}
+```
+
+
+# Try different mtry (Number of variables used at each split)
+
+```{r}
+pd <- tibble(raw=c(0.1, 0.5, 1, 2, 4)) %>%
+  mutate(mtry = floor(raw*sqrt(ncol(data_train)))) %>%
+  mutate(errorrate = NA)
+
+pd
+```
+
+
+```{r}
+for (i in 1:nrow(pd)) {
+  set.seed(0) #Get same CV folds for each different mtry
+  pd$errorrate[i] <- cross_validation(dataset=data_train, mtry=pd$mtry[i], k = 3)
+}
+
+knitr::kable(pd)
+
+ggplot(pd, aes(x=mtry, y=errorrate)) +
+  geom_line() +
+  geom_point() +
+  NULL
+```
+
+
+# Build model with best mtry tested, mtry = 253 and ntree = 700 (used for CV)
+
+```{r}
+set.seed(3)
+
+model2 <- randomForest(response ~., data=trainfold, ntree=700, mtry = 253, importance=TRUE, do.trace=TRUE)
+model2
+
+importance(model2)
+varImpPlot
+
+importance_model2 <- importance(model2)
+
+genes_decrease_accuracy <- as_tibble(importance_model2) %>%
+  arrange(desc(abs(importance_model2$MeanDecreaseAccuracy))) %>%
+  mutate(rank = row_number()) %>%
+  filter(rank <= 500) # Not working, not sure how to keep the names of the genes
+```
+
+
+# Predictions
+
+```{r}
+predTrain <- predict(model2, trainfold, type="class")
+table(predTrain, trainfold$response)
+
+predTest <- predict(model2, testfold, type="class")
+mean(predTest == testfold$response)
+table(predTest, testfold$response)
+
+# We compare with the observed values and calculate error rate
+observed <- testfold$response
+  
+# Our guess on the general error rate of the model
+(test_error <- sum(observed!=predTest)/length(observed)) 
+```
+
+
+
+```{r}
+#Saving predictions in a new variable
+submission <- tibble(predTest)
+head(submission)
+```
+
+
+```{r}
+#Making file
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke", "Max", "Marc")
+team_error       <- test_error
+team_predictions <- submission
+
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error, team_predictions), 
+          path = paste("minitcga_cancer_classification.", team_name, ".rds", sep=""))
+
+#Checking file
+files   <- Sys.glob("minitcga_cancer_classification.*.rds")
+results <- tibble(filename = files)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]     <- x[[1]]
+  results$team_people[i]   <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_error[i]    <- x[[3]]
+  y                        <- x[[4]]
+  results$n_tumor          <- sum(y$predicted=="Tumor")
+  results$n_normal         <- sum(y$predicted=="Normal")
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+```
+
+

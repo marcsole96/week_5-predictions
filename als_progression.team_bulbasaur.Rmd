@@ -1,0 +1,189 @@
+---
+title: "Week 05 in Statistical machine learning in bioinformatics"
+author: "Thomas Bataillon"
+date: "25/02/2021"
+output:
+  html_document:
+        theme: readable
+editor_options: 
+  chunk_output_type: console
+---
+
+---
+
+
+## ALS dataset 
+
+```{r}
+library(tidyverse)
+library(dplyr)
+library(randomForest)
+```
+
+
+Loading the data
+```{r}
+als <- read_rds("/Users/maxgubert/Documents/MSc Bioinformatics AU/2nd semester/SMLiB/datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")
+
+als_data    <- als %>% rename(response=dFRS)
+
+als_train <- als_data %>% 
+  filter(!is.na(response))
+
+als_predict <- als_data %>% 
+  filter(is.na(response))
+```
+
+
+```{r}
+set.seed(1)
+
+model1 <- randomForest(response ~., data=als_train, ntree=100, importance=TRUE, do.trace=TRUE)
+model1
+
+importance(model1)
+model1$mse
+
+MSE <- model1$mse
+MSE <- data.frame(MSE)
+
+tree <- data.frame(n_tree = seq(1, 100, 1),
+                   MSE = MSE$MSE)
+
+
+ggplot(tree, aes(x=n_tree, y=MSE)) +
+  geom_line() +
+  labs(x = "n_trees",
+       y = "MSE") +
+  NULL
+```
+
+
+```{r}
+model2 <- randomForest(response ~., data=als_train, ntree=100, mtry = 300, importance=TRUE, do.trace=TRUE)
+model2
+
+
+model3 <- randomForest(response ~., data=als_train, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+model3
+
+# Random Forest seems to perform poorly with ALS dataset
+```
+
+
+
+Let's try with boosting
+
+```{r}
+library(gbm)
+
+set.seed(6)
+
+model4 <- gbm(formula  = response ~ ., 
+               data = als_train, 
+            n.trees = 1000, 
+           cv.folds = 10)
+
+model4
+```
+
+```{r}
+pd <- tibble(rmse_cv = sqrt(model4$cv.error), 
+             rmse_train = sqrt(model4$train.error)) %>%
+  mutate(tree = row_number()) %>%
+  pivot_longer(names_to = "key", values_to = "value", -tree)
+
+
+ggplot(pd, aes(x=tree, y=value, color=key)) + 
+  geom_line() + 
+  geom_point() + 
+  NULL
+
+
+gbm.perf(model4, method = "cv") #211 trees
+```
+
+
+
+# Predictions
+
+```{r}
+# Always make the same split
+set.seed(10)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+
+# We predict on the test fold
+predicted <- predict(model4, newdata = testfold)
+
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$response
+mse       <- mean((observed-predicted)^2)
+(rmse     <- sqrt(mse))
+
+test_rmse <- rmse
+
+submission <- tibble(predicted)
+```
+
+
+# Submitting your answer
+
+The following code will give us
+
+* your chosen team name
+* the name of the people on the team
+* your estimated RMSE (from train/test or CV or similar)
+* your predictions
+
+Please edit the values below .
+
+The filename of the output will be automated als_progression.TEAMNAME.rds
+
+Please - do not use space or funny letters in your team name.
+
+```{r}
+
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke", "Max", "Marc")
+team_error_rate  <- test_rmse
+team_predictions <- submission
+
+#
+# Always run this code
+# If it fails you have done something wrong!
+#
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error_rate, team_predictions), 
+          path = paste("als_progression.", team_name, ".rds", sep=""))
+
+```
+
+# Checking format of all saved objects
+
+```{r}
+files   <- Sys.glob("als_progression.*.rds")
+results <- tibble(filename = files, team_name=NA, team_people=NA, team_rmse=NA,n=NA, mean=NA)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]        <- x[[1]]
+  results$team_people[i]      <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_rmse[i]        <- x[[3]]
+  y                           <- x[[4]]
+  results$n                   <- nrow(y)
+  results$mean                <- mean(y$predicted, na.rm = T)
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+```
+
