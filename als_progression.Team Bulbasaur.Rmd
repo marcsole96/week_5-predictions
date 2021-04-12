@@ -24,7 +24,8 @@ library(dplyr)
 library(tidyr)
 library(tidyverse)
 library(car)
-
+library(leaps)
+library(glmnet)
 ```
 
 Loading the data
@@ -102,6 +103,63 @@ knn_pred
 
 submission<-data.frame(predicted=knn_pred$pred)
 ```
+
+
+> Lasso
+
+```{r}
+grid =10^ seq (10,-2, length =100)
+
+lasso.mod = glmnet(as.matrix(als_train[,-1]), als_train$dFRS,  alpha=1, lambda=grid)
+
+lasso.mod %>% plot()
+
+#Cross Validation to find best lambda
+
+set.seed(1)
+
+cv.out=cv.glmnet(as.matrix(als_train[,-1]), als_train$dFRS,  alpha=1)
+
+cv.out %>% plot()
+
+bestlam=cv.out$lambda.min
+
+
+#Predict the data using our model and the best lambda we found using CV
+data_testM<-as.matrix(als_predict[-1])
+lasso.pred=predict(lasso.mod,s=bestlam,data_testM)
+
+```
+
+>Cross validation for LASSO RMSE
+
+```{r}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+
+#Find best lambda and fit model
+cv.out = cv.glmnet(as.matrix(trainfold[,-1]), trainfold$dFRS,  alpha=1)
+bestlam=cv.out$lambda.min
+
+  # We predict on the test fold
+predicted <- predict(lasso.mod,s=bestlam,as.matrix(testfold[-1]))
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$dFRS
+mse       <- mean((observed-predicted)^2)
+(rmse     <- sqrt(mse))
+
+test_rmse <- rmse
+```
+
+
+
+
 
 
 > Q use cross validation to examine how accurate are the predictions you can make
