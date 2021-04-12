@@ -102,7 +102,80 @@ knn_pred <- FNN::knn.reg(as.data.frame(als_train[-1]),
 knn_pred
 
 submission<-data.frame(predicted=knn_pred$pred)
+
 ```
+
+```{r}
+#A function that performs the KNN method on a range of k's
+
+testtrn=als_train
+testtst=als_train
+testtst$dFRS<-NA
+test_k <- function(trn, tst, k) {
+  err <- c()
+  for (i in k) {
+    pred = FNN::knn.reg(train = as.data.frame(trn[-1]), 
+               test  = as.data.frame(tst[-1]), 
+               as.data.frame(trn[-1]), 
+               k     = k[i])
+    err[i] <- sqrt(mean(trn$dFRS - pred$pred))
+  }
+  df <- data.frame(k = k, x = 1/k, err_rate = err)
+  return(df)
+}
+
+
+set.seed(2)
+df <- test_k(testtrn, testtst, 1:70)
+
+ggplot(data = df, aes(x = x, y = err_rate, group = 1)) +
+  geom_line(color = "dodgerblue") +
+  geom_point(color = "dodgerblue") +
+  labs(title = "(Test) error rate", x = "1/K", y = "Error rate") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+min(df)
+```
+
+
+>CV to find the best K 
+```{r}
+# Always make the same split
+
+
+err <- c()
+
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+# We fit our model to the training fold
+#fit <-  lm(formula  = myForm, data = trainfold)
+
+for (i in 5:1000){
+
+# We predict on the test fold
+predicted <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
+                test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
+                k = i)
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$dFRS
+mse       <- mean((observed-predicted$pred)^2)
+rmse     <- sqrt(mse)
+
+err[i] <- rmse
+
+}
+
+testo<-data.frame(err)
+
+test_rmse <- rmse
+
+```
+
 
 
 > Lasso
@@ -221,7 +294,7 @@ testfold  <- setdiff(als_train, trainfold)
 # We predict on the test fold
 predicted <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
                 test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
-                k = 10)
+                k = 6)
 
 # We compare with the observed values and calculate RMSE
 observed  <- testfold$dFRS
