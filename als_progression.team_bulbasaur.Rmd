@@ -32,13 +32,20 @@ als_train <- als_data %>%
 
 als_predict <- als_data %>% 
   filter(is.na(response))
+
+# Always make the same split
+set.seed(10)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
 ```
 
 
 ```{r}
 set.seed(1)
 
-model1 <- randomForest(response ~., data=als_train, ntree=100, importance=TRUE, do.trace=TRUE)
+model1 <- randomForest(response ~., data=trainfold, ntree=100, importance=TRUE, do.trace=TRUE)
 model1
 
 importance(model1)
@@ -60,14 +67,85 @@ ggplot(tree, aes(x=n_tree, y=MSE)) +
 
 
 ```{r}
-model2 <- randomForest(response ~., data=als_train, ntree=100, mtry = 300, importance=TRUE, do.trace=TRUE)
+model2 <- randomForest(response ~., data=trainfold, ntree=100, mtry = 300, importance=TRUE, do.trace=TRUE)
 model2
 
 
-model3 <- randomForest(response ~., data=als_train, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+model3 <- randomForest(response ~., data=trainfold, ntree=500, mtry = 123, importance=TRUE, do.trace=TRUE)
 model3
+```
 
-# Random Forest seems to perform poorly with ALS dataset
+
+# Cross validation
+
+```{r, warning=F}
+cross_validation <- function(dataset, mtry=NA, k=10){
+
+  if(is.na(mtry)) {
+    mtry = floor(sqrt(ncol(dataset)))
+  }
+
+  cat(paste(Sys.time(), "Doing mtry:", mtry, "k:", k, "\n"))
+  flush.console()
+
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)
+  cvfolds <- sample(cvfolds)
+  
+  observed  <- dataset$response
+  predicted <- observed
+  
+  for (i in 1:k){
+    rows      <- which(cvfolds==i)
+    testdata  <- dataset[rows,]
+    traindata <- dataset[-rows,]
+    
+    fit <-  randomForest(y = traindata$response,
+                         x = traindata %>% select(-response),
+                     ntree = 500,
+                      mtry = mtry,
+                  do.trace = F)
+    
+    tmp       <- predict(fit,newdata = testdata, type="response")
+    predicted[rows] <- tmp
+  }
+  
+  errors     <- sum(observed!=predicted)
+  error_rate <- errors/length(observed)
+  cat(paste(Sys.time(), "done, error rate:", error_rate, "\n"))
+  flush.console()
+  return(error_rate)
+}
+```
+
+
+# Try different mtry (Number of variables used at each split)
+
+```{r}
+pd <- tibble(raw=c(0.1, 0.25 , 0.5, 0.75, 1)) %>%
+  mutate(mtry = floor(raw*(ncol(als_train)))) %>%
+  mutate(errorrate = NA)
+
+pd
+```
+
+
+```{r}
+for (i in 1:nrow(pd)) {
+  set.seed(0) #Get same CV folds for each different mtry
+  pd$errorrate[i] <- cross_validation(dataset=als_train, mtry=pd$mtry[i], k = 3)
+}
+
+knitr::kable(pd)
+
+ggplot(pd, aes(x=mtry, y=errorrate)) +
+  geom_line() +
+  geom_point() +
+  NULL
+```
+
+
+```{r}
+tuneRF(x = subset(als_train, select = -response), y = als_train$response, ntreeTry = 500, stepFactor = 10)
 ```
 
 
@@ -80,9 +158,11 @@ library(gbm)
 set.seed(6)
 
 model4 <- gbm(formula  = response ~ ., 
-               data = als_train, 
-            n.trees = 1000, 
-           cv.folds = 10)
+               data = trainfold, 
+            n.trees = 1000,
+            shrinkage = 0.1,
+            interaction.depth = 3,
+            cv.folds = 10)
 
 model4
 ```
@@ -100,24 +180,125 @@ ggplot(pd, aes(x=tree, y=value, color=key)) +
   NULL
 
 
-gbm.perf(model4, method = "cv") #211 trees
+gbm.perf(model4, method = "cv") #67 trees
 ```
 
+```{r}
+# create grid search
+hyper_grid <- expand.grid(
+  learning_rate = c(0.3, 0.1, 0.05, 0.01, 0.005),
+  RMSE = NA,
+  trees = NA,
+  time = NA
+)
+
+# execute grid search
+for(i in seq_len(nrow(hyper_grid))) {
+
+  # fit gbm
+  set.seed(123)  # for reproducibility
+  train_time <- system.time({
+    m <- gbm(
+      formula  = response ~ .,
+      data = trainfold, 
+      distribution = "gaussian",
+      n.trees = 1000, 
+      shrinkage = hyper_grid$learning_rate[i], 
+      interaction.depth = 3, 
+      n.minobsinnode = 10,
+      cv.folds = 10 
+   )
+  })
+  
+  # add SSE, trees, and training time to results
+  hyper_grid$RMSE[i]  <- sqrt(min(m$cv.error))
+  hyper_grid$trees[i] <- which.min(m$cv.error)
+  hyper_grid$Time[i]  <- train_time[["elapsed"]]
+
+}
+
+# results
+arrange(hyper_grid, RMSE)
+```
+
+
+```{r}
+# search grid
+hyper_grid <- expand.grid(
+  n.trees = 1000,
+  shrinkage = 0.01,
+  interaction.depth = c(3, 5, 7),
+  n.minobsinnode = c(5, 10, 15)
+)
+
+# create model fit function
+model_fit <- function(n.trees, shrinkage, interaction.depth, n.minobsinnode) {
+  set.seed(123)
+  m <- gbm(
+    formula = response ~ .,
+    data = trainfold,
+    distribution = "gaussian",
+    n.trees = n.trees,
+    shrinkage = shrinkage,
+    interaction.depth = interaction.depth,
+    n.minobsinnode = n.minobsinnode,
+    cv.folds = 10
+  )
+  # compute RMSE
+  sqrt(min(m$cv.error))
+}
+
+# perform search grid with functional programming
+hyper_grid$rmse <- purrr::pmap_dbl(
+  hyper_grid,
+  ~ model_fit(
+    n.trees = ..1,
+    shrinkage = ..2,
+    interaction.depth = ..3,
+    n.minobsinnode = ..4
+    )
+)
+
+# results
+arrange(hyper_grid, rmse)
+```
+
+# Model after tuning parameters
+
+```{r}
+set.seed(7)
+
+model5 <- gbm(formula  = response ~ ., 
+               data = trainfold, 
+            n.trees = 1000,
+            shrinkage = 0.01,
+            interaction.depth = 3,
+            n.minobsinnode = 5,
+            cv.folds = 10)
+
+model5
+
+pd <- tibble(rmse_cv = sqrt(model5$cv.error), 
+             rmse_train = sqrt(model5$train.error)) %>%
+  mutate(tree = row_number()) %>%
+  pivot_longer(names_to = "key", values_to = "value", -tree)
+
+
+ggplot(pd, aes(x=tree, y=value, color=key)) + 
+  geom_line() + 
+  geom_point() + 
+  NULL
+
+
+gbm.perf(model5, method = "cv") #760 trees
+```
 
 
 # Predictions
 
 ```{r}
-# Always make the same split
-set.seed(10)
-
-# We use 80% for training and 20% for evaluation
-trainfold <- als_train %>% sample_frac(size=0.80)
-testfold  <- setdiff(als_train, trainfold)
-
-
 # We predict on the test fold
-predicted <- predict(model4, newdata = testfold)
+predicted <- predict(model3, newdata = testfold)
 
 
 # We compare with the observed values and calculate RMSE
