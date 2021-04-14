@@ -1,0 +1,155 @@
+---
+title: "lasso_tcga"
+author: "Rikke Jensen"
+date: "4/14/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(glmnet)
+```
+
+
+```{r}
+TCGA <- read_rds(path = "miniTCGA.3349x4006.rds") 
+```
+
+# Split into training and prediction set
+
+```{r}
+data_train    <- TCGA %>% filter(!is.na(response))
+data_predict  <- TCGA %>% filter(is.na(response))  
+```
+
+# Split into train and test fold
+
+```{r}
+# # Always make the same split
+# set.seed(0)
+# 
+# # We use 80% for training and 20% for evaluation
+# trainfold <- data_train %>% sample_frac(size=0.80)
+# testfold  <- setdiff(data_train, trainfold)
+```
+
+# Lasso CV function 
+This is for logistic regression - change family to "gaussian" for the ALS data.
+Also, you need to change the way you make the prediction (lasso.pred) and change test error calculation to RMSE.
+
+
+```{r}
+cross_validation <- function(dataset, k) {
+  
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)  # Generate breaks
+  cvfolds <- sample(cvfolds)                                      # Randomize breaks
+
+  observed  <- dataset$response                                   # Get observed values
+  predicted <- rep(NA, nrow(dataset))                             # Empty vector for predicted values
+  bestlam <- rep(NA, k)
+  
+  for (i in 1:k){                                                 # For each fold
+    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
+    testdata  <- dataset[rows,]                                   # Get test values
+    traindata <- dataset[-rows,]                                  # Get training values
+    
+    y <- traindata$response                                       # Get response values for training data
+    traindata <- model.matrix(response ~ ., traindata)[,-1]       
+    testdata <- model.matrix(response ~ ., testdata)[,-1]         # glmnet can only take quantitative input.
+                                                                  #model.matrix produces a matrix of the predictors 
+                                                                  #and transforms qualitative variables into 
+                                                                  #dummy variables
+    
+    
+    lasso.fit = glmnet(traindata, y, 
+                       family = "binomial", alpha = 1)            # Fit the model with training data
+    
+    cv.out <- cv.glmnet(traindata, y, 
+                        family = "binomial", alpha = 1)           # Fit CV lasso to find the best value for lambda
+    bestlam[i] <- cv.out$lambda.min                               # Extract best lambda value
+    
+    lasso.pred <- predict(lasso.fit, s = bestlam[i], 
+                          newx = testdata, type = "response")     # Make prediction with new lambda and test data
+    lasso.pred <- round(lasso.pred)+1                             # Convert probabilities to 1 or 2
+    lasso.pred <- levels(y)[lasso.pred]                           # Change to tumor and cancer
+    
+    predicted[rows] <- lasso.pred                                 # Add predictions to vector
+    
+  }
+  
+  lasso.test_error <- sum(observed!=predicted)/length(predicted)  # Calculate test error
+  
+  return(lasso.test_error)                                        # Return CV test error
+}
+```
+
+# Calculate the CV test error for lasso
+
+```{r}
+set.seed(0)
+df <- data_train %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3")) # Remove unwanted predictors
+
+lasso_test_error <- cross_validation(df, 5) #select number of folds (5 or 10 maybe)
+```
+
+# Making the actual prediction that has to be submitted
+
+```{r}
+set.seed(0)
+x <- model.matrix(response ~ ., df)[,-1]
+y <- data_train$response
+
+lasso.fit = glmnet(x, y, family = "binomial", alpha = 1)
+plot(lasso.fit)
+#CV to choose best lambda
+cv.out <- cv.glmnet(x, y, family = "binomial", alpha = 1) 
+plot(cv.out)
+bestlam <- cv.out$lambda.min #it is almost zero, which means that almost all predictors will be included
+
+test <- data_predict %>% select(!c("response", "rowid", "tissue", "pc1", "pc2", "pc3"))
+test <- as.matrix(test) #cannot use model.matrix, because response is NA
+predicted <- predict(lasso.fit, s = bestlam, newx = test, type = "response")
+predicted <- round(predicted)+1 # Convert probabilities to 1 or 2
+predicted <- levels(y)[predicted]
+
+#Saving predictions in a new variable
+submission <- tibble(predicted)
+head(submission)
+```
+
+#Submission file
+
+```{r}
+#Making file
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke", "Max", "Marc")
+team_error       <- lasso_test_error
+team_predictions <- submission
+
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error, team_predictions), 
+          path = paste("minitcga_cancer_classification_part2.", team_name, ".rds", sep=""))
+
+#Checking file
+files   <- Sys.glob("minitcga_cancer_classification_part2.*.rds")
+results <- tibble(filename = files)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]     <- x[[1]]
+  results$team_people[i]   <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_error[i]    <- x[[3]]
+  y                        <- x[[4]]
+  results$n_tumor          <- sum(y$predicted=="Tumor")
+  results$n_normal         <- sum(y$predicted=="Normal")
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+```
+
