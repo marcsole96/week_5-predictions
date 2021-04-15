@@ -15,9 +15,9 @@ editor_options:
 
 MULTIPLE LINEAR REGRESSION
 
-Load Libraries
+>Load Libraries
 
-```{r}
+```{r Package Loading, include=FALSE}
 # install.packages(c('tibble', 'dplyr', 'tidyr'))
 library(tibble)
 library(dplyr)
@@ -29,9 +29,9 @@ library(glmnet)
 library(randomForest)
 ```
 
-Loading the data
+>Loading the data
 
-```{r}
+```{r Load data}
 als <- read_rds("datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")
 
 als_data    <- als %>% rename(response=dFRS)
@@ -48,7 +48,7 @@ sum(is.na(als_predict))
 
 ```
 
-We can make a correlation matrix to take a peek at how much correlation between the predictors we observe
+> We can make a correlation matrix to take a peek at how much correlation between the predictors we observe
 
 ```{r}
 correlation_matrix<-cor(als_train)
@@ -56,7 +56,7 @@ correlation_matrix<-cor(als_train)
 
 > MLG to predict the response
 
-```{r MLG, eval=FALSE, include=FALSE}
+```{r MLG model}
 
 #Make model with ALL predictors (We should check which are more important)
 
@@ -85,264 +85,14 @@ summary(mlg)
 car::vif(mlg)
 
 
-predicted <- predict(object=mlg, newdata = als_predict, type = "response")
+#pMLG <- predict(object=mlg, newdata = als_predict, type = "response")
 
-submission <- tibble(predicted)
+#submission <- tibble(predicted)
 
-head(submission)
+#head(submission)
 ```
 
-> KNN Regression to predict the response
-
-```{r}
-set.seed(1)
-
-knn_pred <- FNN::knn.reg(as.data.frame(als_train[-1]), 
-                test=as.data.frame(als_predict[-1]), as.data.frame(als_train[1]),
-                k = 10)
-knn_pred
-
-submission<-data.frame(predicted=knn_pred$pred)
-
-```
-
-```{r}
-#A function that performs the KNN method on a range of k's
-
-testtrn=als_train
-testtst=als_train
-testtst$response<-NA
-test_k <- function(trn, tst, k) {
-  err <- c()
-  for (i in k) {
-    pred = FNN::knn.reg(train = as.data.frame(trn[-1]), 
-               test  = as.data.frame(tst[-1]), 
-               as.data.frame(trn[-1]), 
-               k     = k[i])
-    err[i] <- sqrt(mean(trn$response - pred$pred))
-  }
-  df <- data.frame(k = k, x = 1/k, err_rate = err)
-  return(df)
-}
-
-
-set.seed(2)
-df <- test_k(testtrn, testtst, 1:70)
-
-ggplot(data = df, aes(x = x, y = err_rate, group = 1)) +
-  geom_line(color = "dodgerblue") +
-  geom_point(color = "dodgerblue") +
-  labs(title = "(Test) error rate", x = "1/K", y = "Error rate") +
-  theme(plot.title = element_text(hjust = 0.5, size = 20))
-
-min(df)
-```
-
-> CV to find the best K
-
-```{r}
-# Always make the same split
-
-
-err <- c()
-
-set.seed(0)
-
-# We use 80% for training and 20% for evaluation
-trainfold <- als_train %>% sample_frac(size=0.80)
-testfold  <- setdiff(als_train, trainfold)
-
-# We fit our model to the training fold
-#fit <-  lm(formula  = myForm, data = trainfold)
-
-
-# We predict on the test fold
-predicted <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
-                test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
-                k = i)
-
-# We compare with the observed values and calculate RMSE
-observed  <- testfold$response
-mse       <- mean((observed-predicted$pred)^2)
-rmse     <- sqrt(mse)
-
-err[i] <- rmse
-
-}
-
-
-errortree<-data.frame(err)
-
-testo<-data.frame(err)
-
-test_rmse <- rmse
-
-```
-
-> Lasso
-
-```{r}
-grid =10^ seq (10,-2, length =100)
-
-lasso.mod = glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1, lambda=grid)
-
-lasso.mod %>% plot()
-
-#Cross Validation to find best lambda
-
-set.seed(1)
-
-cv.out=cv.glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1)
-bestlam=cv.out$lambda.min
-
-cv.out %>% plot()
-
-#Predict the data using our model and the best lambda we found using CV
-data_testM<-as.matrix(als_predict[-1])
-lasso.pred=predict(lasso.mod,s=bestlam,data_testM)
-
-```
-
-```{r}
-cross_validation <- function(dataset, k) {
-  
-  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)  # Generate breaks
-  cvfolds <- sample(cvfolds)                                      # Randomize breaks
-  observed  <- dataset$response                                   # Get observed values
-  predicted <- rep(NA, nrow(dataset))                             # Empty vector for predicted values
-  bestlam <- rep(NA, k)
-  
-  for (i in 1:k){                                                 # For each fold
-    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
-    testdata  <- dataset[rows,]                                   # Get test values
-    traindata <- dataset[-rows,]                                  # Get training values
-    
-    y <- traindata$response                                       # Get response values for training data
-    traindata <- model.matrix(response ~ ., traindata)[,-1]       
-    testdata <- model.matrix(response ~ ., testdata)[,-1]         # glmnet can only take quantitative input.
-                                                                  #model.matrix produces a matrix of the predictors 
-                                                                  #and transforms qualitative variables into 
-                                                                  #dummy variables
-    
-    cv.out=cv.glmnet(traindata, y,  alpha=1)
-    bestlam=cv.out$lambda.min
-    
-    
-    lasso.fit = glmnet(traindata, y,  alpha=1, lambda=bestlam)
-    
-    lasso.pred=predict(lasso.fit,s=bestlam,testdata)
-    
-    
-    predicted[rows] <- lasso.pred                                 # Add predictions to vector
-    
-  }
-  mse       <- mean((observed-predicted)^2)
-  (rmse     <- sqrt(mse))  # Calculate test error
-  
-  return(rmse)                                        # Return CV test error
-}
-```
-
-# Calculate the CV test error for lasso
-
-```{r}
-set.seed(0)
-lasso_test_error <- cross_validation(als_train, 10) #select number of folds (5 or 10 maybe)
-```
-
-
-
-> Cross validation for LASSO RMSE
-
-```{r}
-# Always make the same split
-set.seed(0)
-
-# We use 80% for training and 20% for evaluation
-trainfold <- als_train %>% sample_frac(size=0.80)
-testfold  <- setdiff(als_train, trainfold)
-
-#Build model
-lasso.fit = glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
-
-
-#Find best lambda and fit model
-cv.out = cv.glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
-bestlam=cv.out$lambda.min
-
-# We predict on the test fold
-predicted <- predict(lasso.fit,s=bestlam,as.matrix(testfold[-1]))
-
-# We compare with the observed values and calculate RMSE
-observed  <- testfold$response
-mse       <- mean((observed-predicted)^2)
-(rmse     <- sqrt(mse))
-
-test_rmse <- rmse
-```
-
-```{r}
-set.seed(1)
-model1 <- randomForest(response ~., data=als_train, ntree=150, importance=TRUE, do.trace=TRUE)
-model1
-importance(model1)
-model1$mse
-MSE <- model1$mse
-MSE <- data.frame(MSE)
-tree <- data.frame(n_tree = seq(1, 150, 1),
-                   MSE = MSE$MSE)
-ggplot(tree, aes(x=n_tree, y=MSE)) +
-  geom_line() +
-  labs(x = "n_trees",
-       y = "MSE") +
-  NULL
-```
-
-# Random forests test:
-
-model2
-
-```{r}
-set.seed(1)
-library(gbm)
-set.seed(6)
-model4 <- gbm(myForm, 
-               data = als_train, 
-            n.trees = 1000, 
-           cv.folds = 10)
-model4
-
-
-model2 <- randomForest(response ~., data=trainfold, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
-model2
-
-```
-
-```{r}
-# Always make the same split
-set.seed(10)
-
-# We use 80% for training and 20% for evaluation
-trainfold <- als_train %>% sample_frac(size=0.80)
-testfold  <- setdiff(als_train, trainfold)
-
-# We fit our model using trainfold
-
-model2 <- randomForest(response ~., data=trainfold, ntree=655, mtry = 78, importance=TRUE, do.trace=TRUE)
-
-# We predict on the test fold
-predicted <- predict(model2, newdata = testfold)
-
-# We compare with the observed values and calculate RMSE
-observed  <- testfold$response
-mse       <- mean((observed-predicted)^2)
-
-(rmse     <- sqrt(mse))
-test_rmse <- rmse
-submission <- tibble(predicted)
-```
-
-> Q use cross validation to examine how accurate are the predictions you can make
+> CV for MLG RMSE
 
 ```{r CV, eval=FALSE, include=FALSE}
 # Function for calculating the 10-fold CV error
@@ -387,7 +137,97 @@ for (i in pd$run) {                                               # For each of 
 knitr::kable(pd)
 ```
 
+
+> KNN Regression to predict the response
+
 ```{r}
+set.seed(1)
+
+KNN <- FNN::knn.reg(as.data.frame(als_train[-1]), 
+                test=as.data.frame(als_predict[-1]), as.data.frame(als_train[1]),
+                k = 15)
+
+#pKNN<-KNN$pred
+
+#submission<-data.frame(predicted=pKNN$pred)
+
+```
+
+```{r Find best K for KNN, eval=FALSE, include=FALSE}
+#A function that performs the KNN method on a range of k's
+
+testtrn=als_train
+testtst=als_train
+testtst$response<-NA
+test_k <- function(trn, tst, k) {
+  err <- c()
+  for (i in k) {
+    pred = FNN::knn.reg(train = as.data.frame(trn[-1]), 
+               test  = as.data.frame(tst[-1]), 
+               as.data.frame(trn[-1]), 
+               k     = k[i])
+    err[i] <- sqrt(mean(trn$response - pred$pred))
+  }
+  df <- data.frame(k = k, x = 1/k, err_rate = err)
+  return(df)
+}
+
+
+set.seed(2)
+df <- test_k(testtrn, testtst, 1:70)
+
+ggplot(data = df, aes(x = x, y = err_rate, group = 1)) +
+  geom_line(color = "dodgerblue") +
+  geom_point(color = "dodgerblue") +
+  labs(title = "(Test) error rate", x = "1/K", y = "Error rate") +
+  theme(plot.title = element_text(hjust = 0.5, size = 20))
+
+min(df)
+```
+
+> CV to find the best K
+
+```{r 80 20 CV for KNN RMSE, eval=FALSE, include=FALSE}
+# Always make the same split
+
+
+err <- c()
+
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+# We fit our model to the training fold
+#fit <-  lm(formula  = myForm, data = trainfold)
+
+
+# We predict on the test fold
+predicted <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
+                test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
+                k = 50)
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$response
+mse       <- mean((observed-predicted$pred)^2)
+rmse     <- sqrt(mse)
+
+err[i] <- rmse
+
+
+
+errortree<-data.frame(err)
+
+testo<-data.frame(err)
+
+(test_rmse <- rmse)
+
+```
+
+> CV to find RMSE for KNN
+
+```{r 80 20 CV for KNN RMSE, eval=FALSE, include=FALSE}
 # Always make the same split
 set.seed(0)
 
@@ -412,6 +252,269 @@ test_rmse <- rmse
 
 
 ```
+
+
+
+> Lasso
+
+```{r Lasso model}
+grid =10^ seq (10,-2, length =100)
+
+lasso.mod = glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1, lambda=grid)
+
+lasso.mod %>% plot()
+
+#Cross Validation to find best lambda
+
+set.seed(1)
+
+cv.out=cv.glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1)
+bestlam=cv.out$lambda.min
+
+cv.out %>% plot()
+
+#Predict the data using our model and the best lambda we found using CV
+data_testM<-as.matrix(als_predict[-1])
+#pLASSO=predict(lasso.mod,s=bestlam,data_testM)
+
+```
+
+```{r 1 row CV for LASSO RMSE (Function), eval=FALSE, include=FALSE}
+cross_validation <- function(dataset, k) {
+  
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)  # Generate breaks
+  cvfolds <- sample(cvfolds)                                      # Randomize breaks
+  observed  <- dataset$response                                   # Get observed values
+  predicted <- rep(NA, nrow(dataset))                             # Empty vector for predicted values
+  bestlam <- rep(NA, k)
+  
+  for (i in 1:k){                                                 # For each fold
+    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
+    testdata  <- dataset[rows,]                                   # Get test values
+    traindata <- dataset[-rows,]                                  # Get training values
+    
+    y <- traindata$response                                       # Get response values for training data
+    traindata <- model.matrix(response ~ ., traindata)[,-1]       
+    testdata <- model.matrix(response ~ ., testdata)[,-1]         # glmnet can only take quantitative input.
+                                                                  #model.matrix produces a matrix of the predictors 
+                                                                  #and transforms qualitative variables into 
+                                                                  #dummy variables
+    
+    cv.out=cv.glmnet(traindata, y,  alpha=1)
+    bestlam=cv.out$lambda.min
+    
+    
+    lasso.fit = glmnet(traindata, y,  alpha=1, lambda=bestlam)
+    
+    lasso.pred=predict(lasso.fit,s=bestlam,testdata)
+    
+    
+    predicted[rows] <- lasso.pred                                 # Add predictions to vector
+    
+  }
+  mse       <- mean((observed-predicted)^2)
+  (rmse     <- sqrt(mse))  # Calculate test error
+  
+  return(rmse)                                        # Return CV test error
+}
+```
+
+
+```{r Calculate the CV test error for lasso using row CV function from before, eval=FALSE, include=FALSE}
+set.seed(0)
+lasso_test_error <- cross_validation(als_train, 10) #select number of folds (5 or 10 maybe)
+```
+
+> Cross validation for LASSO RMSE
+
+```{r 80 20 CV for LASSO RMSE, eval=FALSE, include=FALSE}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+#Build model
+lasso.fit = glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
+
+
+#Find best lambda and fit model
+cv.out = cv.glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
+bestlam=cv.out$lambda.min
+
+# We predict on the test fold
+predicted <- predict(lasso.fit,s=bestlam,as.matrix(testfold[-1]))
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$response
+mse       <- mean((observed-predicted)^2)
+(rmse     <- sqrt(mse))
+
+test_rmse <- rmse
+```
+
+
+
+> Random forests test:
+
+```{r Random forest plot, eval=FALSE, include=FALSE}
+set.seed(1)
+model1 <- randomForest(response ~., data=als_train, ntree=150, importance=TRUE, do.trace=TRUE)
+model1
+importance(model1)
+model1$mse
+MSE <- model1$mse
+MSE <- data.frame(MSE)
+tree <- data.frame(n_tree = seq(1, 150, 1),
+                   MSE = MSE$MSE)
+ggplot(tree, aes(x=n_tree, y=MSE)) +
+  geom_line() +
+  labs(x = "n_trees",
+       y = "MSE") + theme_minimal()
+  NULL
+```
+
+```{r Random Forest model}
+set.seed(1)
+library(gbm)
+set.seed(6)
+pBoost <- gbm(myForm, 
+               data = als_train, 
+            n.trees = 1000, 
+           cv.folds = 10)
+
+
+pRF <- randomForest(response ~., data=als_train, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+
+
+pBoost <- predict(object=pBoost, newdata = als_predict, type = "response")
+pRF <- predict(object=pRF, newdata = als_predict, type = "response")
+```
+>Cross validation for Random Forests
+
+```{r 80 20 CV for Random Forest RMSE, eval=FALSE, include=FALSE}
+# Always make the same split
+set.seed(10)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+# We fit our model using trainfold
+
+model2 <- randomForest(response ~., data=trainfold, ntree=655, mtry = 78, importance=TRUE, do.trace=TRUE)
+
+# We predict on the test fold
+predicted <- predict(model2, newdata = testfold)
+
+# We compare with the observed values and calculate RMSE
+observed  <- testfold$response
+mse       <- mean((observed-predicted)^2)
+
+(rmse     <- sqrt(mse))
+test_rmse <- rmse
+submission <- tibble(predicted)
+```
+
+
+
+# Model Averaging
+
+```{r}
+
+#Assessing the fit on the test data (80 20 cross validation to get RMSE probably?)
+
+# Always make the same split
+set.seed(10)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- als_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(als_train, trainfold)
+
+# We fit our model using trainfold
+
+
+#Make model with ALL predictors (We should check which are more important)
+#We observe 9 predictors which give NA, we will remove them manually from our model
+
+mlg <- lm(response~. -Site.of.Onset.Onset..Limb.and.Bulbar -mean.height -sd.height -no.height.data -no.resp.rate.data -no.bp.diastolic.data -no.slope.fvc.liters.data -first.slope.height.date -num.slope.bp.systolic.visits,data=trainfold)
+
+
+
+
+# KNN
+
+KNN <- FNN::knn.reg(as.data.frame(trainfold[-1]), 
+                test=as.data.frame(testfold[-1]), as.data.frame(trainfold[1]),
+                k = 15)
+
+# LASSO
+
+cv.out=cv.glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
+bestlam=cv.out$lambda.min
+
+# Boost
+
+pBoost <- gbm(myForm, 
+               data = trainfold, 
+            n.trees = 1000, 
+           cv.folds = 10)
+
+# Random Forests
+
+pRF <- randomForest(response ~., data=trainfold, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+
+# We predict on the test fold
+pMLG <- predict(object=mlg, newdata = testfold, type = "response")
+
+pKNN<-KNN$pred
+
+pLASSO=predict(lasso.mod,s=bestlam,as.matrix(testfold[-1]))
+colnames(pLASSO) <- "pLASSO"
+
+pBoost <- predict(object=pBoost, newdata = testfold, type = "response")
+
+pRF <- predict(object=pRF, newdata = testfold)
+
+#Put all predictions in a matrix
+allpreds.test <- cbind(pKNN, pLASSO, pRF)
+
+
+# Put the observations in a vector
+observed  <- testfold$response
+```
+
+>Equal Weights
+
+```{r}
+pred.1overM.mean <- rowMeans(allpreds.test)
+
+mse <- mean((observed-pred.1overM.mean)^2)
+
+(rmse <- sqrt(mse))
+```
+
+>Median of predictions
+
+```{r}
+pred.median <- apply(allpreds.test, 1, median)
+
+mse <- mean((observed-pred.median)^2)
+
+(rmse <- sqrt(mse))
+```
+
+
+  
+
+
+
+
+
+
+
+
 
 # Submitting your answer
 
