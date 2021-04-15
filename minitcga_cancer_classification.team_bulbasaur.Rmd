@@ -1,0 +1,303 @@
+---
+title: "TCGA cancer classification"
+author: "Rikke, Max & Marc"
+date: "3/4/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE, message=FALSE, warning=FALSE}
+library(tidyverse)
+library(dplyr)
+library(glmnet)
+```
+
+```{r}
+df <- read_rds(path = "miniTCGA.3349x4006.rds") 
+```
+
+# Split into training and prediction set
+
+```{r}
+set.seed(0)
+
+data_train    <- df %>% filter(!is.na(response))
+data_predict  <- df %>% filter(is.na(response))                              
+
+dim(data_predict)
+dim(data_train)
+```
+
+# Split into train and test fold
+
+```{r}
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- data_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(data_train, trainfold)
+```
+
+
+
+#Testing
+
+## Part 1. Logistic regression with the top 30 genes (as the winner of round 1)
+
+```{r}
+#OLD
+#creating a df only with response and genes
+# genes <- data_train %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3")) %>% 
+#   mutate(sampletype=response, #saves original variable as a new variable called sampletype
+#          response=ifelse(test= response=="Tumor", yes = 1, no = 0 )) #1 = tumor, 0 = normal
+
+#identifying specific genes that might be good at discriminating between cancer and normal by finding the genes with the biggest difference in mean expression between the two classes
+# genes %>% 
+#   group_by(response) %>% 
+#   summarise(across(everything(), mean)) %>% 
+#   ungroup() %>% 
+#   pivot_longer(!response, names_to = "genes", values_to = "mean_expression") %>% 
+#   group_by(genes) %>% 
+#   summarise(mean_exp_dif = abs(mean_expression[response == 0]) - mean_expression[response == 1]) %>% 
+#   arrange(desc(mean_exp_dif)) %>% 
+#   head() %>% 
+#   {.}
+
+#NEW
+genes <- data_train %>% 
+  select(!c("rowid", "tissue", "pc1", "pc2", "pc3")) %>% 
+  mutate(response=ifelse(test= response=="Tumor", yes = 1, no = 0 )) %>%  #1 = tumor, 0 = normal
+  group_by(response) %>% 
+  summarise(across(everything(), mean)) %>% 
+  ungroup() %>% 
+  pivot_longer(!response, names_to = "genes", values_to = "mean_expression") %>% 
+  group_by(genes) %>% 
+  summarise(mean_exp_dif = abs(mean_expression[response == 0]) - mean_expression[response == 1]) %>% 
+  slice_max(mean_exp_dif, n = 30) %>% 
+  {.}
+
+
+predictors <- paste0(genes$genes, collapse = " + ") #don't know if works. Else, just copy paste output
+
+```
+
+```{r}
+# We fit our model (simple logistic regression on 30 different genes)
+fit <-  glm(response ~ AQP2.359 + HMGCS2.3158 + GPD1.2819 + LOC284578.284578 + CHRDL1.91851 + FXYD4.53828 + PI16.221476 + CLDN8.9073 + FLJ42875.440556 + KCNJ1.3758 + SLC13A2.9058 + ABCA8.10351 + C4orf31.79625 + FREM1.158326 + ANGPTL1.9068 + ANGPTL7.10218 + SLC19A3.80704 + SCN7A.6332 + GCOM1.145781 + PTH1R.5745 + PTGER3.5733 + CLEC3B.7123 + ATP6V0A4.50617 + CNTN1.1272 + MME.4311 + CNTFR.1271 + ITIH5.80760 + RELN.5649 + SEMA3G.56920 + STAC2.342667, data = trainfold, family=binomial(link='logit'))
+#Genes have been chosen as the top 30 the genes with the highest mean difference in expression between the two classes.
+
+# We predict on the test fold
+predicted <- predict(fit, newdata = testfold, type = "response")
+predicted <- round(predicted)+1 # Convert probabilities to 1 or 2
+predicted <- levels(trainfold$response)[predicted]
+
+# We compare with the observed values and calculate error rate
+observed    <- testfold$response
+
+# Our guess on the general error rate of the model
+(test_error <- sum(observed!=predicted)/length(observed)) 
+```
+
+Suggestion: glmulti for variable selection
+Suggestion: Splines https://towardsdatascience.com/from-logistic-regression-to-basis-expansions-and-splines-74d6bb3b8dc6
+
+##Part 2. Lasso + logistic regression
+
+```{r}
+set.seed(0)
+x <- trainfold %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3"))
+x <- model.matrix(response ~ ., x)[,-1]
+y <- trainfold$response
+
+lasso.fit = glmnet(x, trainfold$response, family = "binomial", alpha = 1)
+plot(lasso.fit)
+#CV to choose best lambda
+cv.out <- cv.glmnet(x, trainfold$response, family = "binomial", alpha = 1) 
+plot(cv.out)
+bestlam <- cv.out$lambda.min #it is almost zero, which means that almost all predictors will be included
+
+x.test <- testfold %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3"))
+x.test <- model.matrix(response ~ ., x.test)[,-1]
+lasso.pred <- predict(lasso.fit, s = bestlam, newx = x.test, type = "response")
+lasso.pred <- round(lasso.pred)+1 # Convert probabilities to 1 or 2
+lasso.pred <- levels(trainfold$response)[lasso.pred]
+
+(lasso.test_error <- sum(observed!=lasso.pred)/length(lasso.pred)) 
+```
+
+##Part 2.5 Lasso with CV
+
+```{r}
+cross_validation <- function(dataset, k) {
+  
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = k, labels = F)  # Generate breaks
+  cvfolds <- sample(cvfolds)                                      # Randomize breaks
+
+  observed  <- dataset$response                                   # Get observed values
+  predicted <- rep(NA, nrow(dataset))                             # Empty vector for predicted values
+  bestlam <- rep(NA, k)
+  
+  for (i in 1:k){                                                 # For each fold
+    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
+    testdata  <- dataset[rows,]                                   # Get test values
+    traindata <- dataset[-rows,]                                  # Get training values
+    
+    y <- traindata$response 
+    traindata <- model.matrix(response ~ ., traindata)[,-1]
+    testdata <- model.matrix(response ~ ., testdata)[,-1]
+    
+    
+    lasso.fit = glmnet(traindata, y, 
+                       family = "binomial", alpha = 1)            # Fit the model with training data
+    cv.out <- cv.glmnet(traindata, y, family = "binomial", alpha = 1) 
+    bestlam[i] <- cv.out$lambda.min
+    
+    lasso.pred <- predict(lasso.fit, s = bestlam[i], newx = testdata, type = "response")
+    lasso.pred <- round(lasso.pred)+1 # Convert probabilities to 1 or 2
+    lasso.pred <- levels(y)[lasso.pred]
+    
+    predicted[rows] <- lasso.pred                                 # Add predictions to vector
+    
+  }
+  
+  lasso.test_error <- sum(observed!=predicted)/length(predicted)
+  
+  return(lasso.test_error)                                  # Return CV test error
+}
+```
+
+```{r}
+set.seed(0)
+df <- data_train %>% select(!c("rowid", "tissue", "pc1", "pc2", "pc3"))
+
+cross_validation(df, 5)
+lasso_cv_error <- 0.007349564
+```
+
+
+## Part 3. KNN
+
+```{r}
+set.seed(0)
+library(class)
+train.X <- trainfold %>% select(!c("response", "rowid", "tissue", "pc1", "pc2", "pc3"))
+test.X <- testfold %>% select(!c("response", "rowid", "tissue", "pc1", "pc2", "pc3"))
+#y <- trainfold$response
+#observed <- testfold$response
+knn <- knn(train.X, test.X, y, k = 5)
+table(knn, observed)
+
+#accuracy <- function(x){sum(diag(x)/(sum(rowSums(x)))) * 100}
+
+1-(387+46)/435
+mean(observed != knn) #0.0046 - double the error of lasso
+
+#Testing the best value for k shows k = 5 minimizes error best
+#A function that performs the KNN method on a range of k's
+# test_k <- function(trn, tst, trn_label, tst_label, k) {
+#   err <- c()
+#   for (i in k) {
+#     pred = knn(train = trn, 
+#                test  = tst, 
+#                cl    = trn_label, 
+#                k     = k[i])
+#     err[i] <- mean(tst_label != pred)
+#   }
+#   
+#   df <- data.frame(k = k, x = 1/k, err_rate = err)
+#   return(df)
+# }
+# 
+# df <- test_k(train.X, test.X, y, observed, 1:20)
+
+```
+
+## Part 3.5 KNN with CV
+
+```{r}
+cross_validation_KNN <- function(dataset, x) {
+  
+  cvfolds <- cut(seq_len(nrow(dataset)), breaks = x, labels = F)  # Generate breaks
+  cvfolds <- sample(cvfolds)                                      # Randomize breaks
+
+  error <- rep(NA, x)
+  
+  for (i in 1:x){                                                 # For each fold
+    rows      <- which(cvfolds==i)                                # Get values belonging to that fold
+    testdata  <- dataset[rows,]                                   # Get test values
+    traindata <- dataset[-rows,]                                  # Get training values
+    
+    y <- traindata$response
+    observed <- testdata$response
+    
+    testdata <- testdata %>% select(!"response")
+    traindata <- traindata %>% select(!"response")
+
+    knn <- knn(traindata, testdata, y, k = 5)
+    error[i] <- mean(observed != knn)
+  }
+  
+  knn.error <- mean(error)
+  
+  return(knn.error)                                  # Return CV test error
+}
+
+```
+
+```{r}
+set.seed(0)
+knn_cv_error <- cross_validation_KNN(df, 10) #0.00827
+```
+
+
+
+#Final Fitting - Do this with the model you end up choosing
+
+```{r}
+#Fitting the model again, on the entire training dataset
+fit <-  glm(response ~ GPD1.2819 + LOC284578.284578 + CHRDL1.91851 + FXYD4.53828 + CLDN8.9073 + KCNJ1.3758, data = data_train, family=binomial(link='logit'))
+
+#Predicting actual values
+predicted <- predict(fit, newdata = data_predict, type = "response")
+predicted <- round(predicted)+1 # Convert probabilities to 1 or 2
+predicted <- levels(trainfold$response)[predicted]
+
+#Saving predictions in a new variable
+submission <- tibble(predicted)
+head(submission)
+```
+
+```{r}
+#Making file
+team_name        <- "team_bulbasaur"
+team_people      <- c("Rikke", "Max", "Marc")
+team_error       <- test_error
+team_predictions <- submission
+
+# Extract the columns needed
+team_predictions <- team_predictions %>% select(predicted)
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error, team_predictions), 
+          path = paste("minitcga_cancer_classification.", team_name, ".rds", sep=""))
+
+#Checking file
+files   <- Sys.glob("minitcga_cancer_classification.*.rds")
+results <- tibble(filename = files)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(path = as.character(results$filename[i]))
+  results$team_name[i]     <- x[[1]]
+  results$team_people[i]   <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_error[i]    <- x[[3]]
+  y                        <- x[[4]]
+  results$n_tumor          <- sum(y$predicted=="Tumor")
+  results$n_normal         <- sum(y$predicted=="Normal")
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+```
+
+
