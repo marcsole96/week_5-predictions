@@ -108,14 +108,14 @@ cross_validation <- function(dataset, k=10){
     rows      <- which(cvfolds==i)                                # Get values belonging to that fold
     testdata  <- dataset[rows,]                                   # Get test values
     traindata <- dataset[-rows,]                                  # Get training values
-    fit       <- lm(myForm, data=traindata)                       # Fit the model with training data
+    fit       <- lm(response~., data=traindata)                       # Fit the model with training data
     tmp       <- predict(fit,newdata = testdata)                  # Predict on test data
     predicted[rows] <- tmp                                        # Add predictions to vector
   }
   
   rmse_cv <- sqrt(mean((observed-predicted)^2))        # Calculate CV RMSE
 
-    fit        <- lm(myForm, data=dataset)                          # Fit the model with all the dataset
+    fit        <- lm(response~., data=dataset)                          # Fit the model with all the dataset
   observed   <- dataset$response                                      # Get observed values
   predicted  <- predict(fit,newdata = dataset)                    # Get predicted values
   rmse_train <- sqrt(mean((observed-predicted)^2))     # Calculate training RMSE
@@ -438,7 +438,12 @@ testfold  <- setdiff(als_train, trainfold)
 #Make model with ALL predictors (We should check which are more important)
 #We observe 9 predictors which give NA, we will remove them manually from our model
 
-mlg <- lm(response~. -Site.of.Onset.Onset..Limb.and.Bulbar -mean.height -sd.height -no.height.data -no.resp.rate.data -no.bp.diastolic.data -no.slope.fvc.liters.data -first.slope.height.date -num.slope.bp.systolic.visits,data=trainfold)
+regfit.fwd=regsubsets(response~.,data=trainfold ,nvmax =30,
+method ="forward")
+coeficients=names(coef(regfit.fwd,30))
+myForm <- as.formula(paste("response ~ ", paste (coeficients[-1], collapse=" + "), sep=""))
+
+mlg <- lm(myForm,data=trainfold)
 
 
 
@@ -453,6 +458,8 @@ KNN <- FNN::knn.reg(as.data.frame(trainfold[-1]),
 
 cv.out=cv.glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
 bestlam=cv.out$lambda.min
+
+lasso.mod = glmnet(as.matrix(trainfold[,-1]), trainfold$response,  alpha=1)
 
 # Boost
 
@@ -478,7 +485,7 @@ pBoost <- predict(object=pBoost, newdata = testfold, type = "response")
 pRF <- predict(object=pRF, newdata = testfold)
 
 #Put all predictions in a matrix
-allpreds.test <- cbind(pKNN, pLASSO, pRF)
+allpreds.test <- cbind(pMLG, pLASSO, pRF)
 
 
 # Put the observations in a vector
@@ -501,10 +508,39 @@ mse <- mean((observed-pred.1overM.mean)^2)
 pred.median <- apply(allpreds.test, 1, median)
 
 mse <- mean((observed-pred.median)^2)
-
 (rmse <- sqrt(mse))
+test_rmse<-(rmse <- sqrt(mse))
 ```
 
+>Prediction of the full data using means
+
+```{r}
+#Lasso
+cv.out=cv.glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1)
+bestlam=cv.out$lambda.min
+
+pLASSO=predict(lasso.mod,s=bestlam,as.matrix(als_predict[-1]))
+colnames(pLASSO) <- "pLASSO"
+
+#MLG
+regfit.fwd=regsubsets(response~.,data=als_train ,nvmax =30,
+method ="forward")
+coeficients=names(coef(regfit.fwd,30))
+myForm <- as.formula(paste("response ~ ", paste (coeficients[-1], collapse=" + "), sep=""))
+
+mlg <- lm(myForm,data=als_train)
+
+pMLG <- predict(object=mlg, newdata = als_predict, type = "response")
+
+#RF
+
+pRF <- randomForest(response ~., data=als_train, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+pRF <- predict(object=pRF, newdata = als_predict)
+
+
+allpreds.test <- cbind(pMLG, pLASSO, pRF)
+submission <- rowMeans(allpreds.test)
+```
 
   
 
