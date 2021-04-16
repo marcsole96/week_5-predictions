@@ -485,7 +485,7 @@ pBoost <- predict(object=pBoost, newdata = testfold, type = "response")
 pRF <- predict(object=pRF, newdata = testfold)
 
 #Put all predictions in a matrix
-allpreds.test <- cbind(pMLG, pLASSO, pRF)
+allpreds.test <- cbind(pMLG, pLASSO, pBoost, pRF)
 
 
 # Put the observations in a vector
@@ -500,6 +500,8 @@ pred.1overM.mean <- rowMeans(allpreds.test)
 mse <- mean((observed-pred.1overM.mean)^2)
 
 (rmse <- sqrt(mse))
+
+
 ```
 
 >Median of predictions
@@ -509,12 +511,11 @@ pred.median <- apply(allpreds.test, 1, median)
 
 mse <- mean((observed-pred.median)^2)
 (rmse <- sqrt(mse))
-test_rmse<-(rmse <- sqrt(mse))
 ```
 
 >Prediction of the full data using means
 
-```{r}
+```{r Model averaging , eval=FALSE, include=FALSE}
 #Lasso
 cv.out=cv.glmnet(as.matrix(als_train[,-1]), als_train$response,  alpha=1)
 bestlam=cv.out$lambda.min
@@ -542,7 +543,26 @@ allpreds.test <- cbind(pMLG, pLASSO, pRF)
 submission <- rowMeans(allpreds.test)
 ```
 
-  
+>Prediction of the full data using just RF
+
+```{r}
+#Run The top CV before
+
+mse <- mean((observed-pRF)^2)
+
+(rmse <- sqrt(mse))
+test_rmse=rmse
+
+#RF
+
+pRF <- randomForest(response ~., data=als_train, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+pRF <- predict(object=pRF, newdata = als_predict)
+
+
+submission <- pRF
+submission=data.frame(predicted=submission)
+```
+
 
 
 
