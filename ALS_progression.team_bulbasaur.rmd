@@ -1,0 +1,249 @@
+---
+output:
+  html_document:
+        theme: readable
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+
+library(tidyverse)
+library(caret)
+library(dplyr)
+
+df <- read_rds("C:/Users/mysit/Documents/Bioinformatica/Semestre 2/SMLiB (Statistical & Machine Learning in Bioinformatics)/Dropbox Local/datasets/ALS_data_regression/ALS_progression_rate.1822x370.rds")  %>% tbl_df()
+
+df <- df %>% rename(response = dFRS)
+
+head(df)
+
+```
+
+# Split into training and prediction set
+
+```{r}
+
+set.seed(0)
+
+data_train    <- df %>% filter(!is.na(response))
+data_predict  <- df %>% filter(is.na(response))                              
+
+dim(data_predict)
+dim(data_train)
+
+```
+
+# Example of simple prediction using the mean value
+
+```{r}
+
+# Always make the same split
+set.seed(0)
+
+# We use 80% for training and 20% for evaluation
+trainfold <- data_train %>% sample_frac(size=0.80)
+testfold  <- setdiff(data_train, trainfold)
+
+# We fit our model to the training fold
+
+trControl <- trainControl(method = "repeatedcv", number = 5, repeats = 3, verboseIter = T,allowParallel = F)
+
+training_x<-trainfold %>% select(-response)
+training_y<-trainfold$response
+
+
+car_glmnet <- train(x = training_x, 
+             y = training_y, 
+        method = "glmnet",
+     trControl = trControl
+    )
+
+car_ranger <- train(x = training_x, 
+             y = training_y, 
+        method = "ranger",
+     trControl = trControl
+    )
+
+car_BstLm <- train(x = training_x, 
+             y = training_y, 
+        method = "BstLm",
+     trControl = trControl
+    )
+
+car_leapForward <- train(x = training_x, 
+             y = training_y, 
+        method = "leapForward",
+     trControl = trControl
+    )
+
+
+rf1 <- randomForest(response ~., data=trainfold, ntree=500, mtry = 200, importance=TRUE, do.trace=TRUE)
+
+rf2 <- randomForest(response ~., data=trainfold, ntree=100, mtry = 200, importance=TRUE, do.trace=TRUE)
+
+rf3 <- randomForest(response ~., data=trainfold, ntree=655, mtry = 78, importance=TRUE, do.trace=TRUE)
+
+# We predict on the test fold
+predicted_car_glmnet <- predict(car_glmnet, newdata = testfold)
+
+predicted_car_BstLm <- predict(car_BstLm, newdata = testfold)
+
+predicted_leapForward <- predict(car_leapForward, newdata = testfold)
+
+predicted_rf1 <- predict(rf1, newdata = testfold)
+
+predicted_rf2 <- predict(rf2, newdata = testfold)
+
+predicted_rf3 <- predict(rf3, newdata = testfold)
+
+predicted_ranger<-predict(car_ranger, newdata = testfold)
+
+allpreds.test <- cbind(predicted_car_glmnet,predicted_ranger)
+
+
+# We compare with the observed values and calculate RMSE
+predicted <- rowMeans(allpreds.test)
+
+observed  <- testfold$response
+mse       <- mean((observed-predicted)^2)
+(rmse     <- sqrt(mse))
+
+pred.median <- apply(allpreds.test, 1, median)
+mse_median       <- mean((observed-pred.median)^2)
+(rmse_median     <- sqrt(mse_median))
+
+
+test_rmse <- rmse # Our guess on the general rmse of the model (very unprecise!)
+
+```
+
+# Plot of testfold observed and predicted values and residuals
+ 
+
+```{r}
+
+pd  <- tibble(observed, predicted) %>% 
+  mutate(residual = observed - predicted)
+
+
+ggplot(pd, aes(x=observed, y=predicted)) + 
+  geom_point() +
+  theme_classic() +
+  NULL
+
+
+ggplot(pd, aes(x=observed, y=residual)) + 
+  geom_point() +
+  geom_hline(yintercept = 0, linetype="dashed") +
+  theme_classic() +
+  NULL
+
+rm(pd)
+
+```
+
+# Predict the real unknown data
+
+First we fit the model to all of our known data
+
+Then we predict on the unknown data
+
+The predictions must have the following column and the row order must be the same as the original!
+
+* predicted (the predicted value)
+
+```{r}
+
+trainingfinal_x<-data_train[-1]
+trainingfinal_y<-data_train$response
+
+car_glmnet <- train(x = trainingfinal_x, 
+             y = trainingfinal_y, 
+        method = "glmnet",
+     trControl = trControl
+    )
+
+car_ranger <- train(x = trainingfinal_x, 
+             y = trainingfinal_y, 
+        method = "ranger",
+     trControl = trControl
+    )
+
+
+predicted_glmnet_final <- predict(object=car_glmnet, newdata = data_predict)
+
+predicted_ranger_final <- predict(object=car_ranger, newdata = data_predict)
+
+allpreds <- cbind(predicted_glmnet_final,predicted_ranger_final)
+
+
+predicted <- rowMeans(allpreds)
+
+submission <- tibble(predicted)
+
+head(submission)
+
+```
+
+# Submitting your answer
+
+The following code will give us
+
+* your chosen team name
+* the name of the people on the team
+* your estimated RMSE (from train/test or CV or similar)
+* your predictions
+
+Please edit the values below .
+
+The filename of the output will be automated als_progression.TEAMNAME.rds
+
+Please - do not use space or funny letters in your team name.
+
+```{r}
+
+team_name        <- "Team Bulbasaur"
+team_people      <- c("Marc", "Rikke", "Max")
+team_error_rate  <- test_rmse
+team_predictions <- submission
+
+#
+# Always run this code
+# If it fails you have done something wrong!
+#
+# Extract the columns needed
+team_predictions <- team_predictions[1]
+
+# Save all the stuff in one object
+write_rds(x = list(team_name, team_people, team_error_rate, team_predictions), 
+          file = paste("als_progression.", team_name, ".rds", sep=""))
+
+```
+
+# Checking format of all saved objects
+
+```{r}
+
+files   <- Sys.glob("als_progression.*.rds")
+results <- tibble(filename = files, team_name=NA, team_people=NA, team_rmse=NA,n=NA, mean=NA)
+
+for (i in 1:nrow(results)) {
+  x <- read_rds(as.character(results$filename[i]))
+  results$team_name[i]        <- x[[1]]
+  results$team_people[i]      <- paste(x[[2]], collapse=",", sep=" ")
+  results$team_rmse[i]        <- x[[3]]
+  y                           <- x[[4]]
+  results$n                   <- nrow(y)
+  results$mean                <- mean(y$predicted, na.rm = T)
+}
+
+rm(x,y)
+
+results %>% select(-filename)
+
+```
+
+# Upload your rds file!
+
+
